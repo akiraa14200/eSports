@@ -6082,5 +6082,70 @@ else {
 
   </script>
   <script type="application/json" data-clippy-inline-media-manifest="1">{"version":1,"slots":[]}</script>
+
+  <style>
+  #ff-supa-auth{position:fixed;inset:0;z-index:999999;display:none;align-items:center;justify-content:center;background:rgba(3,7,18,.78);backdrop-filter:blur(18px);padding:20px;font-family:Inter,system-ui,sans-serif}
+  #ff-supa-auth .ff-auth-card{width:min(420px,100%);background:rgba(18,25,43,.97);border:1px solid rgba(255,255,255,.16);border-radius:24px;padding:26px;color:#f7f9ff;box-shadow:0 24px 80px #0008}
+  #ff-supa-auth h2{font-size:24px;margin:0 0 6px} #ff-supa-auth p{color:#aab5cc;font-size:13px;line-height:1.5}
+  #ff-supa-auth input{box-sizing:border-box;width:100%;margin:7px 0;padding:13px 14px;border-radius:12px;border:1px solid #39445d;background:#0b1222;color:white;outline:none}
+  #ff-supa-auth button{cursor:pointer;border:0;border-radius:12px;padding:12px 14px;font-weight:650}
+  #ff-supa-auth .ff-primary{width:100%;background:#b8ccff;color:#111a2b;margin-top:10px}
+  #ff-supa-auth .ff-secondary{background:transparent;color:#c6d5ff;padding-left:0}
+  #ff-supa-auth .ff-close{float:right;background:#29334a;color:#fff}
+  #ff-supa-auth .ff-error{color:#ffaaa8;min-height:18px;font-size:13px}
+  </style>
+  <div id="ff-supa-auth" role="dialog" aria-modal="true" aria-label="Free Fire account sign in">
+    <div class="ff-auth-card"><button class="ff-close" id="ff-auth-close" type="button" aria-label="Close">✕</button>
+      <h2 id="ff-auth-heading">Welcome back</h2><p id="ff-auth-subtitle">Sign in to sync your player profile across devices.</p>
+      <form id="ff-auth-form"><input id="ff-auth-name" autocomplete="nickname" placeholder="Player name (for new account)" style="display:none">
+      <input id="ff-auth-email" type="email" autocomplete="email" placeholder="Email address" required>
+      <input id="ff-auth-password" type="password" autocomplete="current-password" placeholder="Password (at least 6 characters)" minlength="6" required>
+      <div class="ff-error" id="ff-auth-error" aria-live="polite"></div><button class="ff-primary" id="ff-auth-submit" type="submit">Sign in</button></form>
+      <p><span id="ff-auth-toggle-label">New here?</span> <button class="ff-secondary" id="ff-auth-toggle" type="button">Create account</button></p>
+      <p>Protected by Supabase authentication. Your password is handled by Supabase, not stored by this website.</p>
+    </div>
+  </div>
+  <script type="module">
+  import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+  const ffSupabase = createClient("https://cuuakeubowlycfvxeuzl.supabase.co","sb_publishable_TnU5HHluI5T58LcJ0XmeqQ_2PWy2iGm");
+  const ffModal=document.getElementById("ff-supa-auth"), ffForm=document.getElementById("ff-auth-form"), ffName=document.getElementById("ff-auth-name"), ffEmail=document.getElementById("ff-auth-email"), ffPass=document.getElementById("ff-auth-password"), ffError=document.getElementById("ff-auth-error"), ffSubmit=document.getElementById("ff-auth-submit");
+  let ffMode="signin";
+  function ffOpen(){ffModal.style.display="flex";ffError.textContent="";setTimeout(()=>ffEmail.focus(),50)}
+  function ffClose(){ffModal.style.display="none"}
+  function ffSetMode(mode){ffMode=mode;const signup=mode==="signup";document.getElementById("ff-auth-heading").textContent=signup?"Create your player account":"Welcome back";document.getElementById("ff-auth-subtitle").textContent=signup?"Create an account to get your unique player ID.":"Sign in to sync your player profile across devices.";ffName.style.display=signup?"block":"none";ffName.required=signup;ffSubmit.textContent=signup?"Create account":"Sign in";document.getElementById("ff-auth-toggle-label").textContent=signup?"Already have an account?":"New here?";document.getElementById("ff-auth-toggle").textContent=signup?"Sign in":"Create account";ffPass.autocomplete=signup?"new-password":"current-password";ffError.textContent=""}
+  document.getElementById("ff-auth-close").addEventListener("click",ffClose);
+  ffModal.addEventListener("click",e=>{if(e.target===ffModal)ffClose()});
+  document.getElementById("ff-auth-toggle").addEventListener("click",()=>ffSetMode(ffMode==="signin"?"signup":"signin"));
+  document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("button");if(!b)return;const t=(b.innerText||b.textContent||"").trim().toLowerCase();if(t.includes("sign in with google")&&t.includes("mock")){e.preventDefault();e.stopPropagation();if(e.stopImmediatePropagation)e.stopImmediatePropagation();ffSetMode("signin");ffOpen()}},true);
+  ffForm.addEventListener("submit",async e=>{e.preventDefault();ffError.textContent="";ffSubmit.disabled=true;ffSubmit.textContent=ffMode==="signup"?"Creating…":"Signing in…";
+    try{
+      let result;
+      if(ffMode==="signup"){result=await ffSupabase.auth.signUp({email:ffEmail.value.trim(),password:ffPass.value,options:{data:{display_name:ffName.value.trim()||ffEmail.value.split("@")[0]}}})}
+      else{result=await ffSupabase.auth.signInWithPassword({email:ffEmail.value.trim(),password:ffPass.value})}
+      if(result.error)throw result.error;
+      const user=result.data.user;
+      if(!user)throw new Error("Account request completed but no user session was returned.");
+      const displayName=(user.user_metadata&&user.user_metadata.display_name)||ffName.value.trim()||ffEmail.value.split("@")[0];
+      if(result.data.session){
+        let profile=await ffSupabase.from("player_profiles").select("*").eq("user_id",user.id).maybeSingle();
+        if(profile.error)throw profile.error;
+        if(!profile.data){const ins=await ffSupabase.from("player_profiles").insert({user_id:user.id,display_name:displayName}).select("*").maybeSingle();if(ins.error)throw ins.error;profile=ins}
+        const p=profile.data||{};
+        const player={id:user.id,user_id:user.id,name:p.display_name||displayName,email:user.email,playerId:p.player_code||null,player_code:p.player_code||null,supabase:true};
+        localStorage.setItem("ff_supabase_player",JSON.stringify(player));
+        window.dispatchEvent(new CustomEvent("ff:supabase-auth",{detail:{user,profile:p,player}}));
+        ffClose();
+        alert("Signed in successfully"+(player.playerId?" • Player ID: "+player.playerId:"")+".");
+        window.location.reload();
+      }else if(ffMode==="signup"){ffError.textContent="Account created. Check your email to confirm it, then sign in."}
+      else{ffError.textContent="Sign in did not return an active session. Check your email confirmation settings."}
+    }catch(err){ffError.textContent=err.message||"Could not connect. Please try again."}
+    finally{ffSubmit.disabled=false;ffSubmit.textContent=ffMode==="signup"?"Create account":"Sign in"}
+  });
+  ffSupabase.auth.getSession().then(async({data})=>{if(data.session){try{const u=data.session.user;const q=await ffSupabase.from("player_profiles").select("*").eq("user_id",u.id).maybeSingle();if(q.data){localStorage.setItem("ff_supabase_player",JSON.stringify({id:u.id,user_id:u.id,name:q.data.display_name||u.email, email:u.email,playerId:q.data.player_code||null,player_code:q.data.player_code||null,supabase:true}));window.dispatchEvent(new CustomEvent("ff:supabase-auth",{detail:{user:u,profile:q.data}}))}}catch(e){console.warn("Player profile sync failed",e)}}});
+  ffSupabase.auth.onAuthStateChange((event,session)=>{if(event==="SIGNED_OUT")localStorage.removeItem("ff_supabase_player")});
+  window.ffSupabaseClient=ffSupabase;
+  </script>
+
 </body>
 </html>
