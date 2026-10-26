@@ -5921,29 +5921,62 @@ function Df() {
           const client = await window.ffSupabaseReady;
           const { data: { session } } = await client.auth.getSession();
           if (!session?.user?.id || stopped) return;
-          const { data: squads } = await client.from("squads").select("id").eq("captain_id", session.user.id);
-          const ids = (squads || []).map(x => x.id);
-          if (!ids.length || stopped) return;
-          const { data: members, error: membersError } = await client.from("squad_members").select("squad_id,user_id,status,member_role").in("squad_id", ids);
+          const uid = session.user.id;
+          // Load teams through membership, not only captain_id, so ordinary members see their team too.
+          const { data: myMemberships, error: myMembershipError } = await client
+            .from("squad_members").select("squad_id,user_id,status,member_role").eq("user_id", uid).eq("status", "accepted");
+          if (myMembershipError || stopped) return;
+          const memberSquadIds = [...new Set((myMemberships || []).map(x => x.squad_id))];
+          const { data: captainSquads, error: captainSquadsError } = await client
+            .from("squads").select("id,name,captain_id,invite_code,created_at,description").eq("captain_id", uid);
+          if (captainSquadsError || stopped) return;
+          const allIds = [...new Set([...memberSquadIds, ...(captainSquads || []).map(x => x.id)])];
+          if (!allIds.length) return;
+          const { data: squads, error: squadsError } = await client.from("squads")
+            .select("id,name,captain_id,invite_code,created_at,description").in("id", allIds);
+          if (squadsError || stopped) return;
+          const { data: members, error: membersError } = await client.from("squad_members")
+            .select("squad_id,user_id,status,member_role,created_at").in("squad_id", allIds);
           if (membersError || stopped) return;
-          const userIds = [...new Set((members || []).map(x => x.user_id))];
-          const { data: profiles } = userIds.length ? await client.from("player_profiles").select("user_id,player_code,display_name,free_fire_uid,ign,region,avatar_url").in("user_id", userIds) : { data: [] };
+          const userIds = [...new Set([...(members || []).map(x => x.user_id), ...(squads || []).map(x => x.captain_id)])];
+          const { data: profiles, error: profilesError } = await client.from("player_profiles")
+            .select("user_id,player_code,display_name,free_fire_uid,ign,region,avatar_url").in("user_id", userIds);
+          if (profilesError || stopped) return;
           if (stopped) return;
           const byUser = new Map((profiles || []).map(p => [p.user_id, p]));
-          l(prev => prev.map(team => {
-            const dbId = team.dbId;
-            if (!dbId || !ids.includes(dbId)) return team;
-            const roster = (members || []).filter(m => m.squad_id === dbId).map(m => {
-              const profile = byUser.get(m.user_id) || {};
-              return { playerId: profile.player_code || ("FFU-" + String(m.user_id).slice(0,8).toUpperCase()), authUserId: m.user_id, status: m.status, role: m.member_role, joinedAt: m.created_at || null };
+          const rosterFor = (squadId) => (members || []).filter(m => m.squad_id === squadId).map(m => {
+            const profile = byUser.get(m.user_id) || {};
+            return {
+              playerId: profile.player_code || ("FFU-" + String(m.user_id).slice(0,8).toUpperCase()),
+              authUserId: m.user_id, status: m.status, role: m.member_role, joinedAt: m.created_at || null
+            };
+          });
+          const hydratedTeams = (squads || []).map(squad => {
+            const captainProfile = byUser.get(squad.captain_id) || {};
+            const captainId = captainProfile.player_code || ("FFU-" + String(squad.captain_id).slice(0,8).toUpperCase());
+            return {
+              id: "FFT-" + String(squad.id).replace(/-/g, "").slice(-6).toUpperCase(),
+              dbId: squad.id, teamCode: squad.captain_id === uid ? squad.invite_code : undefined,
+              name: squad.name, logo: (squad.name || "T").charAt(0).toUpperCase(),
+              captainId, roster: rosterFor(squad.id), status: "pending",
+              createdAt: squad.created_at || new Date().toISOString(),
+              description: squad.description || ""
+            };
+          });
+          l(prev => {
+            const merged = [...prev];
+            hydratedTeams.forEach(team => {
+              const idx = merged.findIndex(x => x.dbId === team.dbId);
+              if (idx >= 0) merged[idx] = { ...merged[idx], ...team, teamCode: team.teamCode || merged[idx].teamCode };
+              else merged.push(team);
             });
-            return { ...team, roster };
-          }));
+            return merged;
+          });
           n(prev => {
             const merged = [...prev];
             (profiles || []).forEach(p => {
               const id = p.player_code || ("FFU-" + String(p.user_id).slice(0,8).toUpperCase());
-              const user = { id, authUserId: p.user_id, googleName: p.display_name || "Player", ign: p.ign || p.display_name || id, ffUid: p.free_fire_uid || "", region: p.region || "", avatar: p.avatar_url || (p.ign || "P").charAt(0), isAdmin: false };
+              const user = { id, authUserId: p.user_id, googleName: p.display_name || "Player", ign: p.ign || p.display_name || id, ffUid: p.free_fire_uid || "", region: p.region || "", avatar: p.avatar_url || (p.ign || p.display_name || "P").charAt(0), isAdmin: false };
               const at = merged.findIndex(x => x.id === id);
               if (at >= 0) merged[at] = { ...merged[at], ...user }; else merged.push(user);
             });
