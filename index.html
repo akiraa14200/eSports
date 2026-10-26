@@ -1685,6 +1685,38 @@ body {
 </head>
 <body>
   <div id="root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+  (function () {
+    const SUPABASE_URL = "https://cuuakeubowlycfvxeuzl.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_TnU5HHluI5T58LcJ0XmeqQ_2PWy2iGm";
+    if (!window.supabase || !window.supabase.createClient) { console.error("Supabase SDK failed to load"); return; }
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+    window.ffSupabase = client;
+    window.ffSupabaseReady = Promise.resolve(client);
+    async function syncAuthProfile() {
+      try {
+        const { data: { session } } = await client.auth.getSession();
+        const old = JSON.parse(localStorage.getItem("ff_currentUser") || "null");
+        if (!session) { if (old && old.authUserId) { localStorage.removeItem("ff_currentUser"); location.reload(); } return; }
+        let profile = null;
+        for (let attempt = 0; attempt < 5 && !profile; attempt++) {
+          const { data, error } = await client.from("player_profiles").select("user_id,display_name,player_code,free_fire_uid,ign,region,avatar_url,verification_status,is_suspended").eq("user_id", session.user.id).maybeSingle();
+          if (!error) profile = data;
+          if (!profile) await new Promise(resolve => setTimeout(resolve, 400));
+        }
+        if (!profile) { console.error("Could not load player profile"); return; }
+        if (profile.is_suspended) { await client.auth.signOut(); alert("This player account is suspended."); return; }
+        const user = { id: profile.player_code || ("FFU-" + session.user.id.slice(0,8).toUpperCase()), authUserId: session.user.id, googleName: profile.display_name || session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "Player", email: session.user.email || "", ffUid: profile.free_fire_uid || "", ign: profile.ign || "", avatar: profile.avatar_url || (profile.display_name || "P").slice(0,2).toUpperCase(), region: profile.region || "India", status: "active", verified: ({unverified:"Unverified",pending:"Pending",verified:"Verified",rejected:"Rejected"})[profile.verification_status] || "Unverified", joinedAt: session.user.created_at, stats: {tournaments:0,wins:0,kills:0}, isAdmin: false };
+        if (!old || old.authUserId !== user.authUserId || old.id !== user.id) { localStorage.setItem("ff_currentUser", JSON.stringify(user)); location.reload(); }
+        else if (JSON.stringify(old) !== JSON.stringify(user)) localStorage.setItem("ff_currentUser", JSON.stringify({...old,...user}));
+      } catch (e) { console.error("Supabase auth/profile sync failed", e); }
+    }
+    client.auth.onAuthStateChange(() => { setTimeout(syncAuthProfile, 0); });
+    syncAuthProfile();
+  })();
+  </script>
   
   <script type="module">
 var xp = Object.create;
