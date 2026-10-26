@@ -5932,7 +5932,7 @@ function Df() {
       y((p) => [{ id: `A-${Date.now()}`, action: "CREATE_TEAM", by: $.id, target: o.id, timestamp: new Date().toISOString(), details: `Created team ${o.name}` }, ...p]);
       alert("Team created! Your team code is: " + squad.invite_code + "\\nShare this code with players so they can request to join.");
     } catch (err) { alert("Could not create team: " + (err.message || "Please try again.")); }
-  }, Kp == (o, p) => { let k = t.find((v) => v.id === o); if (!k)
+  }, Kp = (o, p) => { let k = t.find((v) => v.id === o); if (!k)
         return; if (k.roster.length >= 7) {
         alert("Team already has 7 players");
         return;
