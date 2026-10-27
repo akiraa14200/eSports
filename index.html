@@ -1710,7 +1710,7 @@ body {
         if (profile.is_suspended) { await client.auth.signOut(); alert("This player account is suspended."); return; }
         const user = { id: profile.player_code || ("FFU-" + session.user.id.slice(0,8).toUpperCase()), authUserId: session.user.id, googleName: profile.display_name || session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "Player", email: session.user.email || "", ffUid: profile.free_fire_uid || "", ign: profile.ign || "", avatar: profile.avatar_url || (profile.display_name || "P").slice(0,2).toUpperCase(), region: profile.region || "India", status: "active", verified: ({unverified:"Unverified",pending:"Pending",verified:"Verified",rejected:"Rejected"})[profile.verification_status] || "Unverified", joinedAt: session.user.created_at, stats: {tournaments:0,wins:0,kills:0}, isAdmin: ["github108@gmail.com", "bijaykumarmuduli97@gmail.com"].includes(String(session.user.email || "").trim().toLowerCase()) };
         if (!old || old.authUserId !== user.authUserId || old.id !== user.id) { localStorage.setItem("ff_currentUser", JSON.stringify(user)); location.reload(); }
-        else if (JSON.stringify(old) !== JSON.stringify(user)) localStorage.setItem("ff_currentUser", JSON.stringify({...old,...user}));
+        else if (JSON.stringify(old) !== JSON.stringify(user)) { localStorage.setItem("ff_currentUser", JSON.stringify({...old,...user})); if (old.isAdmin !== user.isAdmin) location.reload(); }
       } catch (e) { console.error("Supabase auth/profile sync failed", e); }
     }
     client.auth.onAuthStateChange(() => { setTimeout(syncAuthProfile, 0); });
