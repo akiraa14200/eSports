@@ -6205,33 +6205,73 @@ else {
 <script>
 (function(){
  const allowed=['github108@gmail.com','bijaykumarmuduli97@gmail.com'];
- const norm=e=>String(e||'').trim().toLowerCase();
- let adminEmail=false;
- async function checkSession(){
-  try{const c=await window.ffSupabaseReady;if(!c)return;const {data:{session}}=await c.auth.getSession();adminEmail=!!session&&allowed.includes(norm(session.user.email));if(adminEmail)mount();else remove();}
-  catch(e){}
+ const norm=v=>String(v||'').trim().toLowerCase();
+ let client=null,session=null,authorized=false,data={users:[],teams:[],tournaments:[]},tab='overview',query='',loading=false;
+ const css=`
+ #ff-admin-launch{position:fixed;z-index:2147483647;right:14px;bottom:92px;display:none;padding:14px 18px;border-radius:999px;background:linear-gradient(100deg,#ff6b2b,#ff3158);color:#09090b;font:900 13px system-ui,sans-serif;border:2px solid #ffd1bf;box-shadow:0 8px 28px #0009;cursor:pointer}
+ #ff-admin-overlay{position:fixed;inset:0;z-index:2147483646;background:#05060beF;display:none;color:#f8fafc;font-family:system-ui,sans-serif;overflow:auto;padding:14px}
+ #ff-admin-panel{max-width:1050px;margin:0 auto;background:#10111a;border:1px solid #303244;border-radius:20px;overflow:hidden;box-shadow:0 20px 80px #0009}
+ .ffa-head{padding:18px;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#15151f;border-bottom:1px solid #303244;position:sticky;top:0;z-index:2}
+ .ffa-title{font-weight:950;font-size:20px;letter-spacing:.5px}.ffa-sub{font-size:12px;color:#a1a1aa;margin-top:4px}
+ .ffa-btn{border:1px solid #343648;background:#202131;color:#f8fafc;border-radius:10px;padding:10px 12px;font-weight:800;cursor:pointer}
+ .ffa-primary{background:#ff6b2b;color:#100b08;border-color:#ff6b2b}.ffa-tabs{display:flex;gap:8px;padding:12px;overflow:auto;border-bottom:1px solid #292b3a}
+ .ffa-tab{white-space:nowrap;border:1px solid #343648;background:#171824;color:#b8bbc9;border-radius:999px;padding:9px 14px;font-weight:800}.ffa-tab.active{background:#00d4ff;color:#061018;border-color:#00d4ff}
+ .ffa-body{padding:14px}.ffa-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .ffa-stat,.ffa-card{background:#171824;border:1px solid #2d3040;border-radius:14px;padding:14px;min-width:0}.ffa-stat small{color:#a1a1aa;font-size:11px;text-transform:uppercase;letter-spacing:1px}.ffa-stat strong{display:block;font-size:27px;margin-top:6px}
+ .ffa-list{display:grid;gap:10px;margin-top:12px}.ffa-card strong{display:block;overflow-wrap:anywhere}.ffa-meta{color:#a1a1aa;font-size:12px;line-height:1.6;margin-top:5px;overflow-wrap:anywhere}
+ .ffa-search{width:100%;box-sizing:border-box;background:#090a10;color:#fff;border:1px solid #343648;border-radius:10px;padding:12px;font-size:14px;margin:4px 0 10px}
+ .ffa-status{font-size:12px;color:#9ca3af;margin:10px 0}.ffa-error{color:#fca5a5}.ffa-pill{display:inline-block;border-radius:999px;padding:4px 8px;background:#25283a;color:#d1d5db;font-size:11px;font-weight:800}
+ @media(min-width:700px){#ff-admin-overlay{padding:28px}.ffa-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.ffa-body{padding:22px}.ffa-title{font-size:24px}}
+ `;
+ const st=document.createElement('style');st.textContent=css;document.head.appendChild(st);
+ const launch=document.createElement('button');launch.id='ff-admin-launch';launch.textContent='🛡 ADMIN CONTROLS';launch.type='button';launch.onclick=openPanel;
+ const overlay=document.createElement('div');overlay.id='ff-admin-overlay';overlay.innerHTML='<section id="ff-admin-panel"><header class="ffa-head"><div><div class="ffa-title">FREE FIRE · ADMIN</div><div class="ffa-sub" id="ffa-account">Checking administrator access…</div></div><div style="display:flex;gap:7px"><button class="ffa-btn" id="ffa-refresh">↻ Refresh</button><button class="ffa-btn" id="ffa-close">✕ Close</button></div></header><nav class="ffa-tabs" id="ffa-tabs"></nav><main class="ffa-body" id="ffa-content"><p class="ffa-status">Loading admin dashboard…</p></main></section>';
+ document.body.append(launch,overlay);
+ const $=id=>document.getElementById(id);
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function closePanel(){overlay.style.display='none'}
+ function openPanel(){if(!authorized){alert('Sign in with an authorized administrator account first.');return;}overlay.style.display='block';loadData();}
+ $('ffa-close').onclick=closePanel;$('ffa-refresh').onclick=loadData;
+ overlay.addEventListener('click',e=>{if(e.target===overlay)closePanel()});
+ const tabs=[['overview','Overview'],['users','Players'],['teams','Teams'],['tournaments','Tournaments']];
+ $('ffa-tabs').innerHTML=tabs.map(([k,l])=>'<button class="ffa-tab" data-tab="'+k+'">'+l+'</button>').join('');
+ $('ffa-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(!b)return;tab=b.dataset.tab;render()});
+ function stat(label,value){return '<div class="ffa-stat"><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong></div>'}
+ function card(title,meta,badge){return '<article class="ffa-card"><strong>'+esc(title||'Unnamed')+'</strong><div class="ffa-meta">'+esc(meta||'No additional details')+'</div>'+(badge?'<span class="ffa-pill">'+esc(badge)+'</span>':'')+'</article>'}
+ function render(){
+  $('ffa-tabs').querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  const root=$('ffa-content');let html='';
+  if(loading&&!data.users.length&&!data.teams.length&&!data.tournaments.length){root.innerHTML='<p class="ffa-status">Loading secure data…</p>';return;}
+  if(tab==='overview'){
+   html='<div class="ffa-grid">'+stat('Total players',data.users.length)+stat('Verified players',data.users.filter(u=>String(u.verification_status).toLowerCase()==='verified').length)+stat('Suspended players',data.users.filter(u=>u.is_suspended).length)+stat('Teams',data.teams.length)+stat('Tournaments',data.tournaments.length)+'</div><p class="ffa-status">Live database overview. Use the tabs to inspect records.</p>';
+  } else {
+   html='<input class="ffa-search" id="ffa-search" placeholder="Search '+(tab==='users'?'players, email, ID':tab==='teams'?'team name, captain':'tournament name, status')+'" value="'+esc(query)+'">';
+   let items=tab==='users'?data.users:tab==='teams'?data.teams:data.tournaments;
+   const searchable=items.filter(x=>JSON.stringify(x).toLowerCase().includes(query.toLowerCase()));
+   if(tab==='users')html+='<div class="ffa-list">'+searchable.map(u=>card((u.display_name||'Player')+' · '+(u.player_code||''),'Email: '+(u.email||'—')+' · IGN: '+(u.ign||'—')+' · Free Fire UID: '+(u.free_fire_uid||'—')+' · Region: '+(u.region||'—')+' · Joined: '+(u.created_at?new Date(u.created_at).toLocaleDateString():'—'),u.is_suspended?'SUSPENDED':(u.verification_status||'UNVERIFIED'))).join('')+'</div>';
+   if(tab==='teams')html+='<div class="ffa-list">'+searchable.map(t=>card(t.name,'Captain: '+(t.captain_name||t.captain_id||'—')+' · Members: '+(t.members||[]).filter(m=>m.status==='accepted').length+' accepted · Created: '+(t.created_at?new Date(t.created_at).toLocaleDateString():'—'),'TEAM')).join('')+'</div>';
+   if(tab==='tournaments')html+='<div class="ffa-list">'+searchable.map(t=>card(t.title,'Starts: '+(t.starts_at?new Date(t.starts_at).toLocaleString():'Not scheduled')+' · Team size: '+(t.team_size??'—')+' · Max teams: '+(t.max_teams??'—')+' · Entry fee: '+(t.entry_fee??'—')+' · Prize pool: '+(t.prize_pool??'—'),t.status||'UNKNOWN')).join('')+'</div>';
+   if(!searchable.length)html+='<p class="ffa-status">No matching records found.</p>';
+  }
+  root.innerHTML=html;
+  const search=$('ffa-search');if(search)search.addEventListener('input',e=>{query=e.target.value;const pos=e.target.selectionStart;render();const next=$('ffa-search');next.focus();next.setSelectionRange(pos,pos)});
  }
- function remove(){document.getElementById('ff-admin-float')?.remove();}
- function mount(){
-  if(!adminEmail||document.getElementById('ff-admin-float'))return;
-  const b=document.createElement('button');b.id='ff-admin-float';b.type='button';b.textContent='🛡 ADMIN CONTROLS';
-  b.setAttribute('aria-label','Open admin controls');
-  b.style.cssText='position:fixed;z-index:2147483647;right:14px;bottom:92px;display:block;padding:14px 18px;border-radius:999px;background:linear-gradient(100deg,#ff6b2b,#ff3158);color:#09090b;font:900 13px system-ui,sans-serif;letter-spacing:.4px;border:2px solid #ffd1bf;box-shadow:0 8px 28px #0009;cursor:pointer;';
-  b.onclick=()=>{
-   const findAdmin=()=>[...document.querySelectorAll('button')].find(x=>/SUPER ADMIN/.test(x.textContent||''));
-   let t=findAdmin();
-   if(t){t.click();return;}
-   const menu=[...document.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')?.toLowerCase().includes('menu')||/menu/i.test(x.textContent||''));
-   if(menu)menu.click();
-   setTimeout(()=>{t=findAdmin();if(t)t.click();else alert('Your account is authorized, but the admin panel control did not render. Please send a screenshot of the opened menu.');},350);
-  };
-  document.body.appendChild(b);
+ async function loadData(){
+  if(!authorized||!client)return;
+  loading=true;$('ffa-account').textContent='Authorized: '+session.user.email;$('ffa-content').innerHTML='<p class="ffa-status">Loading live records…</p>';
+  try{const {data:result,error}=await client.rpc('ff_admin_dashboard_data');if(error)throw error;data={users:result?.users||[],teams:result?.teams||[],tournaments:result?.tournaments||[]};$('ffa-content').classList.remove('ffa-error');}
+  catch(e){$('ffa-content').innerHTML='<p class="ffa-status ffa-error">Could not load admin data: '+esc(e.message||'Unknown error')+'</p><p class="ffa-status">The server rejected this request or the database is unavailable. Refresh after checking the signed-in account.</p>';return;}
+  finally{loading=false;}
+  render();
  }
- window.addEventListener('load',checkSession);
- if(window.ffSupabaseReady)checkSession();
- setInterval(checkSession,3000);
- const mo=new MutationObserver(()=>{if(adminEmail)mount();});
- mo.observe(document.documentElement,{childList:true,subtree:true});
+ async function check(){
+  try{client=await window.ffSupabaseReady;if(!client)return;const {data:{session:s}}=await client.auth.getSession();session=s;authorized=!!s&&allowed.includes(norm(s.user.email));launch.style.display=authorized?'block':'none';
+   if(authorized){$('ffa-account').textContent='Authorized: '+s.user.email;if(overlay.style.display==='block'&&!loading)loadData();}
+   else{closePanel();}
+  }catch(e){authorized=false;launch.style.display='none';}
+ }
+ check();window.addEventListener('load',check);if(window.ffSupabaseReady)check();setInterval(check,5000);
+ if(client?.auth?.onAuthStateChange)client.auth.onAuthStateChange(()=>setTimeout(check,0));
 })();
 </script>
 </body>
