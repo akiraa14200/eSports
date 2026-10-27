@@ -6202,5 +6202,41 @@ else {
  observer.observe(document.body,{childList:true,subtree:true});setTimeout(mountTeamExtras,1200);
 })();
 </script>
+<script>
+(function(){
+ const allowed=['github108@gmail.com','bijaykumarmuduli97@gmail.com'];
+ const norm=e=>String(e||'').trim().toLowerCase();
+ async function enableForAuthorizedSession(){
+  try{
+   const client=await window.ffSupabaseReady;
+   const {data:{session}}=await client.auth.getSession();
+   if(!session||!allowed.includes(norm(session.user.email)))return;
+   const raw=localStorage.getItem('ff_currentUser');
+   let u=raw?JSON.parse(raw):{};
+   if(u.isAdmin!==true||norm(u.email)!==norm(session.user.email)){
+    u={...u,email:session.user.email,isAdmin:true,authUserId:session.user.id};
+    localStorage.setItem('ff_currentUser',JSON.stringify(u));
+    location.reload();
+   }
+  }catch(e){console.warn('Admin UI sync:',e);}
+ }
+ function addProfileShortcut(){
+  const profile=JSON.parse(localStorage.getItem('ff_currentUser')||'null');
+  if(!profile||!profile.isAdmin||document.getElementById('ff-admin-shortcut'))return;
+  const headings=[...document.querySelectorAll('h1,h2,h3')];
+  const target=headings.find(x=>/security\s*&\s*audit/i.test(x.textContent))?.parentElement;
+  if(!target)return;
+  const b=document.createElement('button');b.id='ff-admin-shortcut';b.type='button';
+  b.textContent='🛡️ OPEN ADMIN CONTROLS';
+  b.style.cssText='display:block;width:100%;margin:12px 0;padding:16px;border-radius:14px;background:linear-gradient(90deg,#ff6b2b,#ff3158);color:#09090b;font-weight:900;font-size:14px;border:1px solid #ff6b2b;';
+  b.onclick=()=>{try{const root=document.getElementById('root');const buttons=[...root.querySelectorAll('button')];const toggle=buttons.find(x=>/SUPER ADMIN/i.test(x.textContent));if(toggle){toggle.click();return;}alert('Admin access is enabled. Open the top-right menu and tap SUPER ADMIN.');}catch(e){alert('Open the top-right menu and tap SUPER ADMIN.');}};
+  target.insertAdjacentElement('beforebegin',b);
+ }
+ window.addEventListener('load',enableForAuthorizedSession);
+ if(window.ffSupabaseReady)enableForAuthorizedSession();
+ const mo=new MutationObserver(addProfileShortcut);mo.observe(document.documentElement,{childList:true,subtree:true});
+ setTimeout(addProfileShortcut,1000);
+})();
+</script>
 </body>
 </html>
